@@ -440,7 +440,7 @@ app.get('/admin/backup', requireAuth, (req, res) => {
     }
     const buffer = zip.toBuffer();
     const fileName = 'mosawy-backup-' + new Date().toISOString().split('T')[0] + '.zip';
-    res.set('Content-Disposition', \`attachment; filename="\${fileName}"\`);
+    res.set('Content-Disposition', `attachment; filename="${fileName}"`);
     res.set('Content-Type', 'application/zip');
     res.send(buffer);
   } catch (err) {
