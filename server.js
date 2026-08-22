@@ -16,9 +16,26 @@ const app = express();
 app.set('trust proxy', 1);
 const PORT = 3000;
 
-// Ensure uploads dir
-const UPLOADS = path.join(__dirname, 'uploads');
+// Ensure storage and uploads dirs
+const STORAGE_DIR = path.join(__dirname, 'storage');
+const UPLOADS = path.join(STORAGE_DIR, 'uploads');
+const SEED_UPLOADS = path.join(__dirname, 'uploads');
+
+if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS)) fs.mkdirSync(UPLOADS, { recursive: true });
+
+// Auto-seed uploads if empty
+if (fs.existsSync(SEED_UPLOADS)) {
+  const existingFiles = fs.readdirSync(UPLOADS);
+  if (existingFiles.length === 0) {
+    const seedFiles = fs.readdirSync(SEED_UPLOADS);
+    for (const f of seedFiles) {
+      if (fs.statSync(path.join(SEED_UPLOADS, f)).isFile()) {
+        fs.copyFileSync(path.join(SEED_UPLOADS, f), path.join(UPLOADS, f));
+      }
+    }
+  }
+}
 
 // Multer config
 const storage = multer.diskStorage({
@@ -432,11 +449,11 @@ app.post('/admin/settings', requireAuth, upload.fields([{ name: 'profile_image',
 app.get('/admin/backup', requireAuth, (req, res) => {
   try {
     const zip = new AdmZip();
-    if (fs.existsSync(path.join(__dirname, 'data.db'))) {
-      zip.addLocalFile(path.join(__dirname, 'data.db'));
+    if (fs.existsSync(path.join(__dirname, 'storage', 'data.db'))) {
+      zip.addLocalFile(path.join(__dirname, 'storage', 'data.db'));
     }
-    if (fs.existsSync(path.join(__dirname, 'uploads'))) {
-      zip.addLocalFolder(path.join(__dirname, 'uploads'), 'uploads');
+    if (fs.existsSync(path.join(__dirname, 'storage', 'uploads'))) {
+      zip.addLocalFolder(path.join(__dirname, 'storage', 'uploads'), 'uploads');
     }
     const buffer = zip.toBuffer();
     const fileName = 'mosawy-backup-' + new Date().toISOString().split('T')[0] + '.zip';
