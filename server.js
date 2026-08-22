@@ -13,6 +13,7 @@ const { requireAuth, loadSettings } = require('./lib/auth');
 const { render, renderWithLayout } = require('./lib/template');
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = 3000;
 
 // Ensure uploads dir
