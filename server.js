@@ -432,8 +432,8 @@ app.post('/admin/settings', requireAuth, upload.fields([{ name: 'profile_image',
 app.get('/admin/backup', requireAuth, (req, res) => {
   try {
     const zip = new AdmZip();
-    if (fs.existsSync(path.join(__dirname, 'database.sqlite'))) {
-      zip.addLocalFile(path.join(__dirname, 'database.sqlite'));
+    if (fs.existsSync(path.join(__dirname, 'data.db'))) {
+      zip.addLocalFile(path.join(__dirname, 'data.db'));
     }
     if (fs.existsSync(path.join(__dirname, 'uploads'))) {
       zip.addLocalFolder(path.join(__dirname, 'uploads'), 'uploads');
