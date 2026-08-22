@@ -1,0 +1,23 @@
+{
+  "name": "mosawy-cms",
+  "version": "1.0.0",
+  "description": "Customizable Arabic CMS with admin panel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "escape-html": "^1.0.3",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.6.2",
+    "express-session": "^1.18.0",
+    "helmet": "^8.3.0",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "adm-zip": "^0.6.0"
+  }
+}
