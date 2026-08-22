@@ -4,7 +4,7 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
-const archiver = require('archiver');
+const AdmZip = require('adm-zip');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const escapeHTML = require('escape-html');
@@ -430,20 +430,22 @@ app.post('/admin/settings', requireAuth, upload.fields([{ name: 'profile_image',
 });
 
 app.get('/admin/backup', requireAuth, (req, res) => {
-  res.attachment('mosawy-backup-' + new Date().toISOString().split('T')[0] + '.zip');
-  const archive = archiver('zip', { zlib: { level: 9 } });
-  
-  archive.on('error', function(err) { res.status(500).send({error: err.message}); });
-  archive.pipe(res);
-  
-  if (fs.existsSync(path.join(__dirname, 'database.sqlite'))) {
-    archive.file(path.join(__dirname, 'database.sqlite'), { name: 'database.sqlite' });
+  try {
+    const zip = new AdmZip();
+    if (fs.existsSync(path.join(__dirname, 'database.sqlite'))) {
+      zip.addLocalFile(path.join(__dirname, 'database.sqlite'));
+    }
+    if (fs.existsSync(path.join(__dirname, 'uploads'))) {
+      zip.addLocalFolder(path.join(__dirname, 'uploads'), 'uploads');
+    }
+    const buffer = zip.toBuffer();
+    const fileName = 'mosawy-backup-' + new Date().toISOString().split('T')[0] + '.zip';
+    res.set('Content-Disposition', \`attachment; filename="\${fileName}"\`);
+    res.set('Content-Type', 'application/zip');
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).send({error: err.message});
   }
-  if (fs.existsSync(path.join(__dirname, 'uploads'))) {
-    archive.directory(path.join(__dirname, 'uploads'), 'uploads');
-  }
-  
-  archive.finalize();
 });
 
 // ---- BOOKS ----
