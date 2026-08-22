@@ -4,6 +4,7 @@ const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const escapeHTML = require('escape-html');
@@ -402,6 +403,11 @@ app.get('/admin/settings', requireAuth, (req, res) => {
         <h3 class="font-display text-lg mb-4" style="color:var(--charcoal)">تغيير كلمة المرور</h3>
         <div class="form-group"><label class="form-label">كلمة المرور الجديدة (اتركها فارغة إن لم ترد التغيير)</label><input type="password" name="new_password" class="form-input"></div>
       </div>
+      <div class="card p-6 mb-6 bg-bronze-light">
+        <h3 class="font-display text-lg mb-4" style="color:var(--charcoal)">نسخة احتياطية (Backup)</h3>
+        <p style="color:var(--muted); margin-bottom: 1rem;">حمل نسخة كاملة من قاعدة البيانات وجميع الملفات المرفوعة بضغطة زر واحدة.</p>
+        <a href="/admin/backup" class="btn btn-primary" style="background-color: var(--charcoal); color: white; border-color: var(--charcoal);">تحميل النسخة الاحتياطية (ZIP)</a>
+      </div>
       <button type="submit" class="btn btn-primary">حفظ الإعدادات</button>
     </form>
   `, 'الإعدادات', 'settings'));
@@ -420,6 +426,23 @@ app.post('/admin/settings', requireAuth, upload.fields([{ name: 'profile_image',
     db.prepare('UPDATE admin SET password_hash = ? WHERE id = 1').run(hash);
   }
   res.redirect('/admin/settings?saved=1');
+});
+
+app.get('/admin/backup', requireAuth, (req, res) => {
+  res.attachment('mosawy-backup-' + new Date().toISOString().split('T')[0] + '.zip');
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  
+  archive.on('error', function(err) { res.status(500).send({error: err.message}); });
+  archive.pipe(res);
+  
+  if (fs.existsSync(path.join(__dirname, 'database.sqlite'))) {
+    archive.file(path.join(__dirname, 'database.sqlite'), { name: 'database.sqlite' });
+  }
+  if (fs.existsSync(path.join(__dirname, 'uploads'))) {
+    archive.directory(path.join(__dirname, 'uploads'), 'uploads');
+  }
+  
+  archive.finalize();
 });
 
 // ---- BOOKS ----
