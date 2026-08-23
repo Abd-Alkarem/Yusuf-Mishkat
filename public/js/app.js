@@ -1,4 +1,8 @@
 /* ===== Theme Toggle ===== */
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
+window.scrollTo(0, 0);
 (function() {
   const saved = localStorage.getItem('theme');
   if (saved === 'dark') {
@@ -294,7 +298,7 @@ function initMarquees() {
   marquees.forEach(wrap => {
     // Check direction
     const isRtl = wrap.getAttribute('dir') !== 'ltr' && document.documentElement.dir === 'rtl';
-    const speed = isRtl ? -0.8 : 0.8; // px per frame
+    const speed = 0.8; // Positive speed moves viewport right -> content slides left
     let isDown = false;
     let startX;
     let scrollLeftStart;
@@ -309,7 +313,9 @@ function initMarquees() {
     // Recalculate width on resize
     const resizeObserver = new ResizeObserver(() => {
       contentWidth = contentNodes[0].offsetWidth;
-      wrap.scrollLeft = contentWidth * 5; // Start in the middle of the buffer
+      const maxScroll = wrap.scrollWidth - wrap.clientWidth;
+      // Start in the middle
+      wrap.scrollLeft = isRtl ? -(maxScroll / 2) : (maxScroll / 2);
     });
     resizeObserver.observe(contentNodes[0]);
 
@@ -333,29 +339,46 @@ function initMarquees() {
 
     // Handle manual scroll wrapping (seamless infinite scroll in both directions)
     wrap.addEventListener('scroll', () => {
-      if (!m.isRtl) {
-        if (wrap.scrollLeft <= contentWidth * 2) {
-          wrap.scrollLeft += contentWidth * 5;
-        } else if (wrap.scrollLeft >= contentWidth * 10) {
-          wrap.scrollLeft -= contentWidth * 5;
+      const maxScroll = wrap.scrollWidth - wrap.clientWidth;
+      if (maxScroll <= 0) return;
+      
+      const jump = contentWidth * Math.max(1, Math.floor((maxScroll / 3) / contentWidth));
+
+      if (!isRtl) {
+        if (wrap.scrollLeft <= contentWidth) {
+          if (m.exactScroll) m.exactScroll += jump;
+          wrap.scrollLeft += jump;
+        } else if (wrap.scrollLeft >= maxScroll - contentWidth) {
+          if (m.exactScroll) m.exactScroll -= jump;
+          wrap.scrollLeft -= jump;
         }
       } else {
-        if (Math.abs(wrap.scrollLeft) <= contentWidth * 2) {
-          wrap.scrollLeft += contentWidth * 5; // Note: depends on browser's RTL scroll behavior
-        } else if (Math.abs(wrap.scrollLeft) >= contentWidth * 10) {
-          wrap.scrollLeft -= contentWidth * 5;
+        if (wrap.scrollLeft >= -contentWidth) {
+          if (m.exactScroll) m.exactScroll -= jump;
+          wrap.scrollLeft -= jump;
+        } else if (wrap.scrollLeft <= -(maxScroll - contentWidth)) {
+          if (m.exactScroll) m.exactScroll += jump;
+          wrap.scrollLeft += jump;
         }
       }
     }, {passive: true});
     
-    const m = { wrap, speed, isDown: () => isDown, getContentWidth: () => contentWidth, isRtl };
+    const m = { wrap, speed, isDown: () => isDown, getContentWidth: () => contentWidth, isRtl, exactScroll: null };
     activeMarquees.push(m);
   });
   
   function step() {
     activeMarquees.forEach(m => {
       if (!m.isDown() && m.getContentWidth() > 0) {
-        m.wrap.scrollLeft += m.speed;
+        if (m.exactScroll === null) m.exactScroll = m.wrap.scrollLeft;
+        
+        // Sync if user scrolled manually
+        if (Math.abs(m.wrap.scrollLeft - m.exactScroll) > 2) {
+          m.exactScroll = m.wrap.scrollLeft;
+        }
+        
+        m.exactScroll += m.speed;
+        m.wrap.scrollLeft = m.exactScroll;
       }
     });
     marqueeRAF = requestAnimationFrame(step);
@@ -365,3 +388,17 @@ function initMarquees() {
     marqueeRAF = requestAnimationFrame(step);
   }
 }
+
+/* ===== Font Size Zoom ===== */
+window.changeFontSize = function(delta) {
+  const body = document.getElementById('article-body');
+  if (!body) return;
+  
+  if (delta === 0) {
+    body.style.zoom = '1';
+    return;
+  }
+  
+  let currentZoom = parseFloat(body.style.zoom || 1);
+  body.style.zoom = Math.max(0.5, currentZoom + (delta > 0 ? 0.1 : -0.1));
+};

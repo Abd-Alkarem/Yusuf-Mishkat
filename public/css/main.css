@@ -981,7 +981,7 @@ h6 {
   height: 2.5rem;
   border-radius: .75rem;
   background: var(--bronze);
-  color: white;
+  color: var(--ivory);
   display: grid;
   place-items: center;
   font-weight: 700;
@@ -1225,6 +1225,20 @@ h6 {
   position: relative;
   overflow: hidden;
   border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--sand) 0%, var(--bg) 100%);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-header::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--bronze), transparent);
+  opacity: 0.7;
 }
 
 .page-header-bg {
@@ -1232,16 +1246,19 @@ h6 {
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: radial-gradient(800px 360px at 90% -20%, rgba(194, 162, 90, .14), transparent 60%);
+  background: radial-gradient(circle at 50% -20%, rgba(194, 162, 90, 0.1), transparent 70%);
 }
 
 .page-header-content {
-  padding-block: 3.5rem;
+  padding-block: 2.5rem 3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 @media (min-width: 768px) {
   .page-header-content {
-    padding-block: 5rem;
+    padding-block: 3.5rem 4rem;
   }
 }
 
@@ -1933,7 +1950,7 @@ h6 {
 
 .article-cover-badge {
   background: var(--bronze);
-  color: #fff;
+  color: var(--ivory);
   font-size: 0.8rem;
   padding: 0.25rem 0.75rem;
   border-radius: 1rem;
@@ -2315,4 +2332,9 @@ html.dark .logo-light {
   .hide-mobile {
     display: none !important;
   }
+}
+
+/* Fix inline colors in dark mode */
+html.dark .prose-ar [style*="color:"] {
+  filter: invert(1) hue-rotate(180deg) brightness(1.2);
 }
