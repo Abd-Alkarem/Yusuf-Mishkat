@@ -8,6 +8,7 @@ const AdmZip = require('adm-zip');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const escapeHTML = require('escape-html');
+const webpush = require('web-push');
 const { getDb } = require('./lib/db');
 const { requireAuth, loadSettings } = require('./lib/auth');
 const { render, renderWithLayout } = require('./lib/template');
@@ -58,7 +59,7 @@ app.use('/uploads', express.static(UPLOADS));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mosawy-cms-static-secure-secret-2026',
   resave: false, saveUninitialized: false,
-  cookie: { 
+  cookie: {
     maxAge: 24 * 60 * 60 * 1000,
     httpOnly: true,
     sameSite: 'lax'
@@ -128,6 +129,8 @@ function publicLayout(body, settings, activeNav = '', extraHtml = '') {
 <title>${settings.site_name || 'الموقع'} — ${settings.site_description || ''}</title>
 <meta name="description" content="${settings.site_description || ''}">
 <link rel="stylesheet" href="/css/fonts.css"><link rel="stylesheet" href="/css/main.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a1815">
 <script src="/js/app.js" defer></script>
 <style>
   .logo-dark { display: none !important; }
@@ -145,6 +148,9 @@ ${extraHtml}
     </a>
     <ul class="nav-links">${desktopNav}</ul>
     <div class="flex items-center gap-2">
+      <button type="button" class="nav-btn install-app-btn" aria-label="تثبيت التطبيق" style="display:none; color: var(--bronze);" title="تثبيت التطبيق على جهازك">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
       <button type="button" class="nav-btn" onclick="toggleTheme()" aria-label="تبديل المظهر">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
       </button>
@@ -184,8 +190,14 @@ ${body}
         <h2 style="font-size:.875rem;font-weight:600;color:var(--charcoal);margin-bottom:1rem">تواصل</h2>
         <ul style="display:flex;flex-direction:column;gap:.625rem;font-size:.95rem">
           ${socials.map(s => s.replace('<a ', '<a style="color:var(--muted);transition:color .2s" onmouseover="this.style.color=\'var(--bronze)\'" onmouseout="this.style.color=\'var(--muted)\'" ')).join('')}
+          <li><button id="btn-subscribe-push" style="background:none;border:none;padding:0;color:var(--muted);cursor:pointer;font-family:inherit;font-size:inherit;transition:color .2s" onmouseover="this.style.color='var(--bronze)'" onmouseout="this.style.color='var(--muted)'">تفعيل الإشعارات</button></li>
         </ul>
-      </div>` : ''}
+      </div>` : `<div>
+        <h2 style="font-size:.875rem;font-weight:600;color:var(--charcoal);margin-bottom:1rem">إعدادات</h2>
+        <ul style="display:flex;flex-direction:column;gap:.625rem;font-size:.95rem">
+          <li><button id="btn-subscribe-push" style="background:none;border:none;padding:0;color:var(--muted);cursor:pointer;font-family:inherit;font-size:inherit;transition:color .2s" onmouseover="this.style.color='var(--bronze)'" onmouseout="this.style.color='var(--muted)'">تفعيل الإشعارات</button></li>
+        </ul>
+      </div>`}
     </div>
     <div style="margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--line);text-align:center;font-size:.875rem;color:var(--muted)">
       <p>© ${new Date().getFullYear()} ${settings.site_name || ''}. جميع الحقوق محفوظة.</p>
@@ -197,6 +209,8 @@ ${body}
 }
 
 function adminLayout(body, title, activeNav = '') {
+  const db = getDb();
+  const unreadMsgs = db.prepare('SELECT COUNT(*) as c FROM messages WHERE read = 0').get().c;
   const navItems = [
     { href: '/admin', label: 'لوحة التحكم', key: 'dashboard', icon: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>' },
     { href: '/admin/settings', label: 'إعدادات الموقع', key: 'settings', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>' },
@@ -207,13 +221,15 @@ function adminLayout(body, title, activeNav = '') {
     { href: '/admin/benefits', label: 'الفوائد', key: 'benefits', icon: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>' },
     { href: '/admin/sections', label: 'الأقسام', key: 'sections', icon: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>' },
     { href: '/admin/biography', label: 'عقيدتي ومنهجي', key: 'biography', icon: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>' },
-    { href: '/admin/messages', label: 'الرسائل', key: 'messages', icon: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>' },
+    { href: '/admin/messages', label: 'الرسائل', key: 'messages', icon: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>', count: unreadMsgs },
+    { href: '/admin/notifications', label: 'إشعارات التطبيق', key: 'notifications', icon: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>' }
   ];
 
   const sideNav = navItems.map(n =>
     `<a class="nav-item ${activeNav === n.key ? 'active' : ''}" href="${n.href}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${n.icon}</svg>
       ${n.label}
+      ${n.count ? `<span class="badge" style="background:var(--bronze);color:white;margin-right:auto;font-size:0.7rem;padding:0.1rem 0.5rem;border-radius:1rem">${n.count}</span>` : ''}
     </a>`
   ).join('');
 
@@ -223,6 +239,8 @@ function adminLayout(body, title, activeNav = '') {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} — لوحة التحكم</title>
 <link rel="stylesheet" href="/css/fonts.css"><link rel="stylesheet" href="/css/main.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a1815">
 <script src="https://cdn.jsdelivr.net/npm/tinymce@6.8.2/tinymce.min.js" referrerpolicy="origin"></script>
 <link href="https://cdn.jsdelivr.net/npm/@yaireo/tagify/dist/tagify.css" rel="stylesheet" type="text/css" />
 <script src="https://cdn.jsdelivr.net/npm/@yaireo/tagify"></script>
@@ -306,6 +324,8 @@ app.get('/admin/login', (req, res) => {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>تسجيل الدخول</title>
 <link rel="stylesheet" href="/css/fonts.css"><link rel="stylesheet" href="/css/main.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a1815">
 <script src="/js/app.js" defer></script>
 </head><body>
 <div class="login-page">
@@ -351,7 +371,7 @@ app.get('/admin/api/tags', requireAuth, (req, res) => {
   const db = getDb();
   const tables = ['articles', 'books', 'audio_books', 'audio_reviews', 'benefits'];
   const tagsSet = new Set();
-  
+
   tables.forEach(table => {
     try {
       const records = db.prepare(`SELECT tags FROM ${table} WHERE tags IS NOT NULL AND tags != ''`).all();
@@ -364,7 +384,7 @@ app.get('/admin/api/tags', requireAuth, (req, res) => {
       // ignore missing tables
     }
   });
-  
+
   res.json(Array.from(tagsSet).filter(t => t));
 });
 
@@ -457,6 +477,11 @@ app.get('/admin/settings', requireAuth, (req, res) => {
         </div>
       </div>
       <div class="card p-6 mb-6">
+        <h3 class="font-display text-lg mb-4" style="color:var(--charcoal)">إعدادات التنبيهات (Web Push)</h3>
+        <div class="form-group"><label class="form-label">VAPID Public Key</label><input type="text" name="vapid_public_key" class="form-input" value="${s.vapid_public_key || ''}" dir="ltr"></div>
+        <div class="form-group"><label class="form-label">VAPID Private Key</label><input type="password" name="vapid_private_key" class="form-input" value="${s.vapid_private_key || ''}" dir="ltr"></div>
+      </div>
+      <div class="card p-6 mb-6">
         <h3 class="font-display text-lg mb-4" style="color:var(--charcoal)">وسائل التواصل</h3>
         <div class="form-group"><label class="form-label">البريد الإلكتروني</label><input type="email" name="contact_email" class="form-input" value="${s.contact_email || ''}" dir="ltr"></div>
         <div class="form-group"><label class="form-label">يوتيوب</label><input type="url" name="social_youtube" class="form-input" value="${s.social_youtube || ''}" dir="ltr" placeholder="https://youtube.com/..."></div>
@@ -481,7 +506,7 @@ app.get('/admin/settings', requireAuth, (req, res) => {
 app.post('/admin/settings', requireAuth, upload.fields([{ name: 'profile_image', maxCount: 1 }, { name: 'site_logo_image', maxCount: 1 }, { name: 'site_logo_dark', maxCount: 1 }]), (req, res) => {
   const db = getDb();
   const upsert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?');
-  const fields = ['site_name', 'site_description', 'hero_tags', 'contact_email', 'social_youtube', 'social_twitter', 'social_instagram', 'social_telegram'];
+  const fields = ['site_name', 'site_description', 'hero_tags', 'contact_email', 'social_youtube', 'social_twitter', 'social_instagram', 'social_telegram', 'vapid_public_key', 'vapid_private_key'];
   for (const f of fields) { upsert.run(f, req.body[f] || '', req.body[f] || ''); }
   if (req.files?.profile_image?.[0]) { upsert.run('profile_image', req.files.profile_image[0].filename, req.files.profile_image[0].filename); }
   if (req.files?.site_logo_image?.[0]) { upsert.run('site_logo_image', req.files.site_logo_image[0].filename, req.files.site_logo_image[0].filename); }
@@ -508,7 +533,7 @@ app.get('/admin/backup', requireAuth, (req, res) => {
     res.set('Content-Type', 'application/zip');
     res.send(buffer);
   } catch (err) {
-    res.status(500).send({error: err.message});
+    res.status(500).send({ error: err.message });
   }
 });
 
@@ -766,7 +791,7 @@ function articleForm(article = null, sections = []) {
         </div>
         <div class="form-group">
           <label class="form-label">ملف للتحميل (PDF) (اختياري)</label>
-          ${article && article.pdf_file ? `<div class="mb-2"><a href="/uploads/${article.pdf_file}" target="_blank" class="btn btn-outline btn-sm">عرض الملف الحالي</a></div>` : ''}
+          ${article && article.pdf_file ? `<div class="mb-2"><a href="/uploads/${article.pdf_file}" class="btn btn-outline btn-sm">عرض الملف الحالي</a></div>` : ''}
           <div class="form-file-wrapper"><input type="file" name="pdf_file" accept="application/pdf" onchange="this.nextElementSibling.innerText = this.files[0].name"><p style="color:var(--muted);font-size:.9rem">اضغط لرفع نسخة PDF للمقال</p></div>
         </div>
       </div>
@@ -1279,6 +1304,83 @@ app.post('/admin/messages/:id/delete', requireAuth, (req, res) => {
   res.redirect('/admin/messages?deleted=1');
 });
 
+// ---- NOTIFICATIONS ----
+app.get('/admin/notifications', requireAuth, (req, res) => {
+  const db = getDb();
+  const msg = req.query.sent ? '<div class="alert alert-success" data-auto-dismiss>تم إرسال الإشعار بنجاح!</div>' :
+    req.query.error ? '<div class="alert alert-danger" data-auto-dismiss>حدث خطأ أثناء الإرسال. تأكد من إعداد المفاتيح.</div>' : '';
+  const subCount = db.prepare('SELECT COUNT(*) as c FROM push_subscriptions').get().c;
+
+  res.send(adminLayout(`
+    <div class="admin-topbar">
+      <h1 class="font-display">إرسال إشعارات للتطبيق</h1>
+    </div>
+    ${msg}
+    <div class="grid" style="gap:1.5rem">
+      <div class="card p-6">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;border-bottom:1px solid var(--line);padding-bottom:1rem">
+          <h2 style="font-size:1.1rem;font-weight:600;color:var(--charcoal)">إرسال إشعار جديد</h2>
+          <span class="badge badge-success">عدد المشتركين: ${subCount}</span>
+        </div>
+        <form method="POST" action="/admin/notifications/send">
+          <div class="form-group">
+            <label class="form-label">عنوان الإشعار</label>
+            <input type="text" name="title" class="form-input" required placeholder="مثال: كتاب جديد متاح الآن">
+          </div>
+          <div class="form-group">
+            <label class="form-label">محتوى الإشعار</label>
+            <textarea name="body" class="form-textarea" required rows="3" placeholder="تفاصيل الإشعار هنا..."></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">الرابط عند النقر (اختياري)</label>
+            <input type="text" name="url" class="form-input" placeholder="مثال: /books/1" dir="ltr">
+          </div>
+          <button type="submit" class="btn btn-primary" ${subCount === 0 ? 'disabled' : ''}>إرسال الإشعار الآن</button>
+        </form>
+      </div>
+    </div>
+  `, 'إشعارات التطبيق', 'notifications'));
+});
+
+app.post('/admin/notifications/send', requireAuth, express.urlencoded({ extended: true }), async (req, res) => {
+  const db = getDb();
+  const s = getSettings(db);
+
+  if (!s.vapid_public_key || !s.vapid_private_key) {
+    return res.redirect('/admin/notifications?error=1');
+  }
+
+  webpush.setVapidDetails('mailto:admin@example.com', s.vapid_public_key, s.vapid_private_key);
+
+  const payload = JSON.stringify({
+    title: req.body.title,
+    body: req.body.body,
+    url: req.body.url || '/',
+    icon: '/images/pfp-192.png'
+  });
+
+  const subscriptions = db.prepare('SELECT * FROM push_subscriptions').all();
+
+  for (const sub of subscriptions) {
+    const pushSubscription = {
+      endpoint: sub.endpoint,
+      keys: {
+        p256dh: sub.keys_p256dh,
+        auth: sub.keys_auth
+      }
+    };
+    try {
+      await webpush.sendNotification(pushSubscription, payload);
+    } catch (err) {
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        db.prepare('DELETE FROM push_subscriptions WHERE id = ?').run(sub.id);
+      }
+    }
+  }
+
+  res.redirect('/admin/notifications?sent=1');
+});
+
 // ==================== PUBLIC ROUTES ====================
 
 // HOME
@@ -1286,6 +1388,8 @@ app.get('/', (req, res) => {
   const db = getDb();
   const s = getSettings(db);
   const books = db.prepare('SELECT * FROM books WHERE visible = 1 ORDER BY created_at DESC LIMIT 20').all();
+
+  const vapidPublicKey = s.vapid_public_key || '';
 
   // For sections horizontal lists
   const sections = db.prepare('SELECT * FROM sections ORDER BY name').all();
@@ -1328,6 +1432,7 @@ app.get('/', (req, res) => {
   ).join('');
 
   res.send(publicLayout(`
+    <script>window.vapidPublicKey = "${vapidPublicKey}";</script>
     <section class="hero">
       <div class="hero-bg" aria-hidden="true"></div>
       <div class="container-x" style="padding-block:2rem">
@@ -1400,9 +1505,9 @@ app.get('/books', (req, res) => {
   const db = getDb();
   const s = getSettings(db);
   const tagQuery = req.query.tag || '';
-  
+
   let books = db.prepare('SELECT * FROM books WHERE visible = 1 ORDER BY created_at DESC').all();
-  
+
   const allTags = new Set();
   books.forEach(b => {
     if (b.tags) {
@@ -1496,6 +1601,28 @@ app.get('/books', (req, res) => {
   `, s, 'books'));
 });
 
+// PUSH SUBSCRIPTION API
+app.post('/api/subscribe', express.json(), (req, res) => {
+  const db = getDb();
+  const subscription = req.body;
+
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: 'Invalid subscription' });
+  }
+
+  try {
+    db.prepare('INSERT OR REPLACE INTO push_subscriptions (endpoint, keys_p256dh, keys_auth) VALUES (?, ?, ?)').run(
+      subscription.endpoint,
+      subscription.keys.p256dh,
+      subscription.keys.auth
+    );
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 app.get('/books/:id', (req, res) => {
   const db = getDb();
   db.prepare('UPDATE books SET views = views + 1 WHERE id = ?').run(req.params.id);
@@ -1522,8 +1649,8 @@ app.get('/books/:id', (req, res) => {
 
       ${book.pdf_file ? `
       <div style="margin-top:2rem;max-width:300px">
-        <a href="/books/${book.id}/download" target="_blank" class="btn btn-primary" style="width:100%;justify-content:center;padding:1rem;border-radius:0.5rem;font-size:1.1rem;background:#1a8a5b;border-color:#1a8a5b">تنزيل الكتاب ⬇️</a>
-        <p style="text-align:center;font-size:0.75rem;color:var(--muted);margin-top:0.5rem">ملف PDF - يبدأ التنزيل مباشرة</p>
+        <a href="/books/${book.id}/download" class="btn btn-primary" style="width:100%;justify-content:center;padding:1rem;border-radius:0.5rem;font-size:1.1rem;background:#1a8a5b;border-color:#1a8a5b">تحميل الكتاب مجاناً</a>
+        <p style="text-align:center;font-size:0.75rem;color:var(--muted);margin-top:0.5rem">ملف PDF</p>
       </div>` : ''}
     </div></section>
     
@@ -1576,9 +1703,9 @@ app.get('/audio-books', (req, res) => {
   const db = getDb();
   const s = getSettings(db);
   const tagQuery = req.query.tag || '';
-  
+
   let audioBooks = db.prepare('SELECT * FROM audio_books WHERE visible = 1 ORDER BY created_at DESC').all();
-  
+
   const allTags = new Set();
   audioBooks.forEach(b => {
     if (b.tags) {
@@ -1739,9 +1866,9 @@ app.get('/audio-reviews', (req, res) => {
   const db = getDb();
   const s = getSettings(db);
   const tagQuery = req.query.tag || '';
-  
+
   let reviews = db.prepare('SELECT * FROM audio_reviews WHERE visible = 1 ORDER BY created_at DESC').all();
-  
+
   const allTags = new Set();
   reviews.forEach(r => {
     if (r.tags) {
@@ -1813,7 +1940,7 @@ app.get('/audio-reviews', (req, res) => {
       <a href="/audio-reviews/${r.id}" style="text-decoration:none;color:inherit;">
         ${r.cover_image ? `<img src="/uploads/${r.cover_image}" style="width:100%;height:200px;object-fit:cover;border-radius:0.5rem;border:1px solid var(--line);margin-bottom:1rem;">` : ''}
         <h3 style="font-weight:700;font-size:1.2rem;color:var(--charcoal);margin-bottom:0.5rem;">${r.title}</h3>
-        <p style="color:var(--muted);font-size:0.95rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${(r.description || '').substring(0,150)}...</p>
+        <p style="color:var(--muted);font-size:0.95rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">${(r.description || '').substring(0, 150)}...</p>
       </a>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:auto">
         <a href="/audio-reviews/${r.id}" class="btn btn-outline btn-sm" style="border-radius:2rem">عرض التفاصيل والاستماع</a>
@@ -2013,12 +2140,12 @@ app.get('/audio-reviews/:id', (req, res) => {
       ${review.audio_file ? `
       <div class="samsung-player">
         <div class="samsung-cover">
-          ${review.cover_image ? 
-            `<img src="/uploads/${review.cover_image}" alt="Cover">` :
-            `<div class="samsung-cover-placeholder">
+          ${review.cover_image ?
+        `<img src="/uploads/${review.cover_image}" alt="Cover">` :
+        `<div class="samsung-cover-placeholder">
               <svg width="80" height="80" fill="white" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
             </div>`
-          }
+      }
         </div>
 
         <div class="samsung-content">
@@ -2172,7 +2299,7 @@ app.get('/audio-reviews/:id', (req, res) => {
 
       ${review.pdf_file ? `
       <div style="text-align:center; margin-bottom:2rem;">
-        <a href="/uploads/${review.pdf_file}" target="_blank" class="btn" style="display:inline-flex;align-items:center;gap:0.75rem;padding:0.875rem 2rem;border-radius:2rem;background:var(--bronze);color:var(--ivory);text-decoration:none;font-weight:600;font-size:1.1rem;box-shadow:0 10px 20px -5px color-mix(in srgb, var(--bronze) 50%, transparent);">
+        <a href="/uploads/${review.pdf_file}" class="btn" style="display:inline-flex;align-items:center;gap:0.75rem;padding:0.875rem 2rem;border-radius:2rem;background:var(--bronze);color:var(--ivory);text-decoration:none;font-weight:600;font-size:1.1rem;box-shadow:0 10px 20px -5px color-mix(in srgb, var(--bronze) 50%, transparent);">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           عرض المرفق (PDF)
         </a>
@@ -2258,9 +2385,9 @@ app.get('/articles', (req, res) => {
   const db = getDb();
   const s = getSettings(db);
   const tagQuery = req.query.tag || '';
-  
+
   let articles = db.prepare('SELECT a.*, s.name as section_name FROM articles a LEFT JOIN sections s ON a.section_id = s.id ORDER BY a.created_at DESC').all();
-  
+
   const allTags = new Set();
   articles.forEach(b => {
     if (b.tags) {
@@ -2427,7 +2554,7 @@ app.get('/articles/:id', (req, res) => {
         </div>
         <button onclick="window.print()" class="btn btn-outline btn-sm" title="طباعة / PDF"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
         <button onclick="navigator.share({title:'${article.title}', url:window.location.href})" class="btn btn-outline btn-sm" title="مشاركة"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg></button>
-        ${article.pdf_file ? `<a href="/uploads/${article.pdf_file}" target="_blank" class="btn btn-outline btn-sm" style="color:#1a8a5b;border-color:#1a8a5b"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> تنزيل PDF</a>` : ''}
+        ${article.pdf_file ? `<a href="/uploads/${article.pdf_file}" class="btn btn-outline btn-sm" style="color:#1a8a5b;border-color:#1a8a5b"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg> تنزيل PDF</a>` : ''}
       </div>
       
       ${article.audio_file ? `
@@ -2542,9 +2669,9 @@ app.get('/benefits', (req, res) => {
   const db = getDb();
   const s = getSettings(db);
   const tagQuery = req.query.tag || '';
-  
+
   let benefits = db.prepare('SELECT * FROM benefits WHERE visible = 1 ORDER BY created_at DESC').all();
-  
+
   const allTags = new Set();
   benefits.forEach(b => {
     if (b.tags) {
@@ -2620,10 +2747,10 @@ app.get('/benefits', (req, res) => {
   const listHtml = benefits.map(b => `
     <div style="background:var(--paper);border:1px solid var(--line);border-radius:1rem;padding:1.5rem;margin-bottom:1rem;box-shadow:0 2px 4px rgba(0,0,0,0.02);display:flex;flex-direction:column;gap:1rem;">
       <div style="display:flex;align-items:center;gap:0.75rem">
-        ${s.profile_image 
-          ? `<img src="/uploads/${s.profile_image}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid var(--line);">`
-          : `<div style="width:40px;height:40px;border-radius:50%;background:var(--bronze);color:var(--ivory);display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:1.2rem;">${s.site_name ? s.site_name.charAt(0) : 'م'}</div>`
-        }
+        ${s.profile_image
+      ? `<img src="/uploads/${s.profile_image}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid var(--line);">`
+      : `<div style="width:40px;height:40px;border-radius:50%;background:var(--bronze);color:var(--ivory);display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:1.2rem;">${s.site_name ? s.site_name.charAt(0) : 'م'}</div>`
+    }
         <div>
           <div style="font-weight:600;color:var(--charcoal)">${s.site_name || 'الكاتب'}</div>
           <div style="font-size:0.8rem;color:var(--muted)">${b.created_at ? b.created_at.split('T')[0] : ''}</div>

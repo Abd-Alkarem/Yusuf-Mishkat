@@ -402,3 +402,101 @@ window.changeFontSize = function(delta) {
   let currentZoom = parseFloat(body.style.zoom || 1);
   body.style.zoom = Math.max(0.5, currentZoom + (delta > 0 ? 0.1 : -0.1));
 };
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(registration => {
+      console.log('SW registered: ', registration);
+    }).catch(registrationError => {
+      console.log('SW registration failed: ', registrationError);
+    });
+  });
+}
+
+
+// PWA Install Logic
+let deferredPrompt;
+const installBtns = document.querySelectorAll('.install-app-btn');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  deferredPrompt = e;
+  installBtns.forEach(btn => btn.style.display = 'grid');
+});
+
+installBtns.forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        installBtns.forEach(b => b.style.display = 'none');
+      }
+      deferredPrompt = null;
+    }
+  });
+});
+
+
+// --- Push Notifications Logic ---
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function subscribeUserToPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    alert('????????? ??? ?????? ?? ??????.');
+    return;
+  }
+  if (!window.vapidPublicKey) {
+    alert('????? ????????? ??? ???? ?? ??????.');
+    return;
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      alert('??? ????? ?????? ?? ?????????!');
+      return;
+    }
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(window.vapidPublicKey)
+    });
+    const response = await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(subscription)
+    });
+    if (response.ok) {
+      alert('?? ????? ????????? ?????!');
+    } else {
+      alert('??? ??? ????? ????? ?????????.');
+    }
+  } catch (err) {
+    console.error('Failed to subscribe', err);
+    alert('?? ??? ????? ?? ??? ???.');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-subscribe-push');
+  if (btn) btn.addEventListener('click', subscribeUserToPush);
+});
+
+
+window.addEventListener('popstate', (e) => {
+  const container = document.getElementById('pdf-viewer-container');
+  if (container && container.style.display === 'block') {
+    container.style.display = 'none';
+    const btn = document.querySelector('button[onclick*="pdf-frame"]');
+    if (btn) btn.style.display = 'inline-flex';
+    document.getElementById('pdf-frame').src = '';
+  }
+});
