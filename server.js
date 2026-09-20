@@ -15,7 +15,7 @@ const { render, renderWithLayout } = require('./lib/template');
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Ensure storage and uploads dirs
 const STORAGE_DIR = path.join(__dirname, 'storage');
