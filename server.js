@@ -25,15 +25,14 @@ const SEED_UPLOADS = path.join(__dirname, 'uploads');
 if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR, { recursive: true });
 if (!fs.existsSync(UPLOADS)) fs.mkdirSync(UPLOADS, { recursive: true });
 
-// Auto-seed uploads if empty
+// Auto-seed uploads if empty or missing files
 if (fs.existsSync(SEED_UPLOADS)) {
-  const existingFiles = fs.readdirSync(UPLOADS);
-  if (existingFiles.length === 0) {
-    const seedFiles = fs.readdirSync(SEED_UPLOADS);
-    for (const f of seedFiles) {
-      if (fs.statSync(path.join(SEED_UPLOADS, f)).isFile()) {
-        fs.copyFileSync(path.join(SEED_UPLOADS, f), path.join(UPLOADS, f));
-      }
+  const seedFiles = fs.readdirSync(SEED_UPLOADS);
+  for (const f of seedFiles) {
+    const src = path.join(SEED_UPLOADS, f);
+    const dest = path.join(UPLOADS, f);
+    if (fs.statSync(src).isFile() && !fs.existsSync(dest)) {
+      try { fs.copyFileSync(src, dest); } catch (e) {}
     }
   }
 }
@@ -54,6 +53,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(UPLOADS));
+app.use('/uploads', express.static(SEED_UPLOADS));
 
 // Secure Session
 app.use(session({
